@@ -1,0 +1,53 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: mynginxes.webapp.mynginx.amandahla.xyz
+spec:
+  group: webapp.mynginx.amandahla.xyz
+  names:
+    kind: MyNginx
+    listKind: MyNginxList
+    plural: mynginxes
+    singular: mynginx
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: MyNginx is the Schema for the mynginxes API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: MyNginxSpec defines the desired state of MyNginx.
+            properties:
+              replicas:
+                description: Number of replicas
+                type: integer
+            type: object
+          status:
+            description: MyNginxStatus defines the observed state of MyNginx.
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
