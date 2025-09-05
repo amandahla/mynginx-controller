@@ -7,4 +7,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: src
 repo: github.com/amandahla/mynginx-controller
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: mynginx.amandahla.xyz
+  group: webapp
+  kind: MyNginx
+  path: github.com/amandahla/mynginx-controller/api/v1
+  version: v1
 version: "3"
