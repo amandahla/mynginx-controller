@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +30,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	webappv1 "github.com/amandahla/mynginx-controller/api/v1"
+	"k8s.io/utils/ptr"
 )
 
 // MyNginxReconciler reconciles a MyNginx object
@@ -62,34 +64,49 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	pod := &corev1.Pod{}
 	ns := req.NamespacedName.Namespace
 	if ns == "" {
 		ns = "default"
 	}
-	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, pod)
+	myDeployment := &appsv1.Deployment{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
 	if kerrors.IsNotFound(err) {
-		log.Info("creating pod")
-		pod := &corev1.Pod{
+		log.Info("creating deployment")
+
+		labels := map[string]string{
+			"app": myNginx.Name,
+		}
+		newDeployment := &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      myNginx.Name,
 				Namespace: myNginx.Namespace,
 			},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:  "nginx",
-						Image: "nginx",
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr.To(int32(myNginx.Spec.Replicas)),
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: labels,
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "nginx",
+								Image: "nginx",
+							},
+						},
 					},
 				},
 			},
 		}
 
-		if err := ctrl.SetControllerReference(&myNginx, pod, r.Scheme); err != nil {
+		if err := ctrl.SetControllerReference(&myNginx, newDeployment, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
 
-		err := r.Create(ctx, pod)
+		err := r.Create(ctx, newDeployment)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
