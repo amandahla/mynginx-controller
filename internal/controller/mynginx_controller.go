@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	webappv1 "github.com/amandahla/mynginx-controller/api/v1"
@@ -42,6 +43,7 @@ type MyNginxReconciler struct {
 // +kubebuilder:rbac:groups=webapp.mynginx.amandahla.xyz,resources=mynginxes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=webapp.mynginx.amandahla.xyz,resources=mynginxes/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=webapp.mynginx.amandahla.xyz,resources=mynginxes/finalizers,verbs=update
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -55,8 +57,9 @@ type MyNginxReconciler struct {
 func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	var myNginx webappv1.MyNginx
-	if err := r.Get(ctx, req.NamespacedName, &myNginx); err != nil {
+	// GET MYNGINX
+	myNginx := &webappv1.MyNginx{}
+	if err := r.Get(ctx, req.NamespacedName, myNginx); err != nil {
 		log.Error(err, "unable to fetch myNginx")
 		// we'll ignore not-found errors, since they can't be fixed by an immediate
 		// requeue (we'll need to wait for a new notification), and we can get them
@@ -64,12 +67,49 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// GET DEPLOYMENT
 	ns := req.NamespacedName.Namespace
 	if ns == "" {
 		ns = "default"
 	}
 	myDeployment := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
+
+	// DELETE
+	myFinalizerName := "webapp.mynginx.amandahla.xyz/finalizer"
+	// examine DeletionTimestamp to determine if object is under deletion
+	if myNginx.ObjectMeta.DeletionTimestamp.IsZero() {
+		// The object is not being deleted, so if it does not have our finalizer,
+		// then let's add the finalizer and update the object. This is equivalent
+		// to registering our finalizer.
+		if !controllerutil.ContainsFinalizer(myNginx, myFinalizerName) {
+			controllerutil.AddFinalizer(myNginx, myFinalizerName)
+			if err := r.Update(ctx, myNginx); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		// The object is being deleted
+		if controllerutil.ContainsFinalizer(myNginx, myFinalizerName) {
+			// our finalizer is present, so let's handle any external dependency
+			log.Info("deleting deployment")
+			if err := r.Delete(ctx, myDeployment); err != nil {
+				// if fail to delete the external dependency here, return with error
+				// so that it can be retried.
+				return ctrl.Result{}, err
+			}
+
+			// remove our finalizer from the list and update it.
+			controllerutil.RemoveFinalizer(myNginx, myFinalizerName)
+			if err := r.Update(ctx, myNginx); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		// Stop reconciliation as the item is being deleted
+		return ctrl.Result{}, nil
+	}
+
+	// CREATE
 	if kerrors.IsNotFound(err) {
 		log.Info("creating deployment")
 
@@ -102,7 +142,7 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			},
 		}
 
-		if err := ctrl.SetControllerReference(&myNginx, newDeployment, r.Scheme); err != nil {
+		if err := ctrl.SetControllerReference(myNginx, newDeployment, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -111,12 +151,13 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
+	// UPDATE
 	if err == nil {
 		// myDeployment was found and we need to check if replicas are the same
 		if *myDeployment.Spec.Replicas != int32(myNginx.Spec.Replicas) {
 			myDeployment.Spec.Replicas = ptr.To(int32(myNginx.Spec.Replicas))
 			log.Info("updating deployment")
-			r.Update(ctx, myDeployment)
+			r.Update(ctx, myDeployment) // change to patch
 		}
 	}
 	return ctrl.Result{}, nil
