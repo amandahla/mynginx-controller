@@ -111,6 +111,14 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
+	if err == nil {
+		// myDeployment was found and we need to check if replicas are the same
+		if *myDeployment.Spec.Replicas != int32(myNginx.Spec.Replicas) {
+			myDeployment.Spec.Replicas = ptr.To(int32(myNginx.Spec.Replicas))
+			log.Info("updating deployment")
+			r.Update(ctx, myDeployment)
+		}
+	}
 	return ctrl.Result{}, nil
 }
 
