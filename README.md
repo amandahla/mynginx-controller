@@ -13,4 +13,8 @@
 - If CRD changes, reconcile.
 - If ConfigMap changes, ignore.
 - If Secret changes, reconcile.
+
+## Changelog
+
+1. Controller creates, updates and deletes deployment based on CRD mynginx.
   
