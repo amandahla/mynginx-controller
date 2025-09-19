@@ -16,5 +16,9 @@
 
 ## Changelog
 
-1. Controller creates, updates and deletes deployment based on CRD mynginx.
+### 2025-09-19
+Refactor finalizer and ensureDeployment.
+
+### 2025-09-01
+Controller creates, updates and deletes deployment based on CRD mynginx.
   
