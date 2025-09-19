@@ -44,20 +44,9 @@ type MyNginxReconciler struct {
 // +kubebuilder:rbac:groups=webapp.mynginx.amandahla.xyz,resources=mynginxes/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=webapp.mynginx.amandahla.xyz,resources=mynginxes/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the MyNginx object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.2/pkg/reconcile
 func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	// GET MYNGINX
 	myNginx := &webappv1.MyNginx{}
 	if err := r.Get(ctx, req.NamespacedName, myNginx); err != nil {
 		log.Error(err, "unable to fetch myNginx")
@@ -67,15 +56,32 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// GET DEPLOYMENT
 	ns := req.NamespacedName.Namespace
 	if ns == "" {
 		ns = "default"
 	}
 	myDeployment := &appsv1.Deployment{}
-	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
+	_ = r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
 
-	// DELETE
+	log.Info("handling finalizer")
+	stop, err := r.handleFinalizer(ctx, myNginx, myDeployment)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if stop {
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("ensuring deployment")
+	err = r.ensureDeployment(ctx, myNginx, ns)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *MyNginxReconciler) handleFinalizer(ctx context.Context, myNginx *webappv1.MyNginx, myDeployment *appsv1.Deployment) (bool, error) {
 	myFinalizerName := "webapp.mynginx.amandahla.xyz/finalizer"
 	// examine DeletionTimestamp to determine if object is under deletion
 	if myNginx.ObjectMeta.DeletionTimestamp.IsZero() {
@@ -85,34 +91,35 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if !controllerutil.ContainsFinalizer(myNginx, myFinalizerName) {
 			controllerutil.AddFinalizer(myNginx, myFinalizerName)
 			if err := r.Update(ctx, myNginx); err != nil {
-				return ctrl.Result{}, err
+				return true, err
 			}
 		}
 	} else {
 		// The object is being deleted
 		if controllerutil.ContainsFinalizer(myNginx, myFinalizerName) {
 			// our finalizer is present, so let's handle any external dependency
-			log.Info("deleting deployment")
 			if err := r.Delete(ctx, myDeployment); err != nil {
 				// if fail to delete the external dependency here, return with error
 				// so that it can be retried.
-				return ctrl.Result{}, err
+				return true, err
 			}
 
 			// remove our finalizer from the list and update it.
 			controllerutil.RemoveFinalizer(myNginx, myFinalizerName)
 			if err := r.Update(ctx, myNginx); err != nil {
-				return ctrl.Result{}, err
+				return true, err
 			}
 		}
 		// Stop reconciliation as the item is being deleted
-		return ctrl.Result{}, nil
+		return true, nil
 	}
+	return false, nil
+}
 
-	// CREATE
+func (r *MyNginxReconciler) ensureDeployment(ctx context.Context, myNginx *webappv1.MyNginx, ns string) error {
+	myDeployment := &appsv1.Deployment{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
 	if kerrors.IsNotFound(err) {
-		log.Info("creating deployment")
-
 		labels := map[string]string{
 			"app": myNginx.Name,
 		}
@@ -143,24 +150,23 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		if err := ctrl.SetControllerReference(myNginx, newDeployment, r.Scheme); err != nil {
-			return ctrl.Result{}, err
+			return err
 		}
 
 		err := r.Create(ctx, newDeployment)
 		if err != nil {
-			return ctrl.Result{}, err
+			return err
 		}
 	}
-	// UPDATE
+
 	if err == nil {
 		// myDeployment was found and we need to check if replicas are the same
 		if *myDeployment.Spec.Replicas != int32(myNginx.Spec.Replicas) {
 			myDeployment.Spec.Replicas = ptr.To(int32(myNginx.Spec.Replicas))
-			log.Info("updating deployment")
 			r.Update(ctx, myDeployment) // change to patch
 		}
 	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
