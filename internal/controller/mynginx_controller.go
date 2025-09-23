@@ -98,7 +98,16 @@ func (r *MyNginxReconciler) handleFinalizer(ctx context.Context, myNginx *webapp
 		// The object is being deleted
 		if controllerutil.ContainsFinalizer(myNginx, myFinalizerName) {
 			// our finalizer is present, so let's handle any external dependency
-			if err := r.Delete(ctx, myDeployment); err != nil {
+			// myDeployment was externally deleted
+			if myDeployment.Name == "" { // TODO watch deployments so if deleted, is recreated and we dont need to check this.
+				controllerutil.RemoveFinalizer(myNginx, myFinalizerName)
+				if err := r.Update(ctx, myNginx); err != nil {
+					return true, err
+				}
+				return true, nil
+			}
+			err := r.Delete(ctx, myDeployment)
+			if err != nil && !kerrors.IsNotFound(err) {
 				// if fail to delete the external dependency here, return with error
 				// so that it can be retried.
 				return true, err
@@ -162,8 +171,12 @@ func (r *MyNginxReconciler) ensureDeployment(ctx context.Context, myNginx *webap
 	if err == nil {
 		// myDeployment was found and we need to check if replicas are the same
 		if *myDeployment.Spec.Replicas != int32(myNginx.Spec.Replicas) {
+			patch := client.MergeFrom(myDeployment.DeepCopy())
 			myDeployment.Spec.Replicas = ptr.To(int32(myNginx.Spec.Replicas))
-			r.Update(ctx, myDeployment) // change to patch
+			err = r.Patch(ctx, myDeployment, patch)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
