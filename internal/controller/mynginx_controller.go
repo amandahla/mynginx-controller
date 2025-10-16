@@ -34,6 +34,9 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+// MyNginxFinalizer defines finalizer name
+const MyNginxFinalizer = "webapp.mynginx.amandahla.xyz/finalizer"
+
 // MyNginxReconciler reconciles a MyNginx object
 type MyNginxReconciler struct {
 	client.Client
@@ -45,7 +48,7 @@ type MyNginxReconciler struct {
 // +kubebuilder:rbac:groups=webapp.mynginx.amandahla.xyz,resources=mynginxes/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
+	log := logf.FromContext(ctx).WithValues("name", req.Name, "namespace", req.Namespace)
 
 	myNginx := &webappv1.MyNginx{}
 	if err := r.Get(ctx, req.NamespacedName, myNginx); err != nil {
@@ -82,29 +85,24 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func (r *MyNginxReconciler) handleFinalizer(ctx context.Context, myNginx *webappv1.MyNginx, myDeployment *appsv1.Deployment) (bool, error) {
-	myFinalizerName := "webapp.mynginx.amandahla.xyz/finalizer"
 	// examine DeletionTimestamp to determine if object is under deletion
 	if myNginx.ObjectMeta.DeletionTimestamp.IsZero() {
 		// The object is not being deleted, so if it does not have our finalizer,
 		// then let's add the finalizer and update the object. This is equivalent
 		// to registering our finalizer.
-		if !controllerutil.ContainsFinalizer(myNginx, myFinalizerName) {
-			controllerutil.AddFinalizer(myNginx, myFinalizerName)
-			if err := r.Update(ctx, myNginx); err != nil {
-				return true, err
-			}
+		if changed := controllerutil.AddFinalizer(myNginx, MyNginxFinalizer); changed {
+			err := r.Update(ctx, myNginx)
+			return true, err
 		}
 	} else {
 		// The object is being deleted
-		if controllerutil.ContainsFinalizer(myNginx, myFinalizerName) {
+		if controllerutil.ContainsFinalizer(myNginx, MyNginxFinalizer) {
 			// our finalizer is present, so let's handle any external dependency
 			// myDeployment was externally deleted
 			if myDeployment.Name == "" { // TODO watch deployments so if deleted, is recreated and we dont need to check this.
-				controllerutil.RemoveFinalizer(myNginx, myFinalizerName)
-				if err := r.Update(ctx, myNginx); err != nil {
-					return true, err
-				}
-				return true, nil
+				controllerutil.RemoveFinalizer(myNginx, MyNginxFinalizer)
+				err := r.Update(ctx, myNginx)
+				return true, err
 			}
 			err := r.Delete(ctx, myDeployment)
 			if err != nil && !kerrors.IsNotFound(err) {
@@ -114,10 +112,9 @@ func (r *MyNginxReconciler) handleFinalizer(ctx context.Context, myNginx *webapp
 			}
 
 			// remove our finalizer from the list and update it.
-			controllerutil.RemoveFinalizer(myNginx, myFinalizerName)
-			if err := r.Update(ctx, myNginx); err != nil {
-				return true, err
-			}
+			controllerutil.RemoveFinalizer(myNginx, MyNginxFinalizer)
+			err = r.Update(ctx, myNginx)
+			return true, err
 		}
 		// Stop reconciliation as the item is being deleted
 		return true, nil
