@@ -41,6 +41,7 @@ spec:
             properties:
               replicas:
                 description: Number of replicas
+                format: int32
                 type: integer
             type: object
           status:

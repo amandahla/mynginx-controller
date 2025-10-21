@@ -135,7 +135,7 @@ func (r *MyNginxReconciler) ensureDeployment(ctx context.Context, myNginx *webap
 				Namespace: myNginx.Namespace,
 			},
 			Spec: appsv1.DeploymentSpec{
-				Replicas: ptr.To(int32(myNginx.Spec.Replicas)),
+				Replicas: ptr.To(myNginx.Spec.Replicas),
 				Selector: &metav1.LabelSelector{
 					MatchLabels: labels,
 				},
@@ -167,7 +167,7 @@ func (r *MyNginxReconciler) ensureDeployment(ctx context.Context, myNginx *webap
 
 	if err == nil {
 		// myDeployment was found and we need to check if replicas are the same
-		if *myDeployment.Spec.Replicas != int32(myNginx.Spec.Replicas) {
+		if *myDeployment.Spec.Replicas != myNginx.Spec.Replicas {
 			patch := client.MergeFrom(myDeployment.DeepCopy())
 			myDeployment.Spec.Replicas = ptr.To(int32(myNginx.Spec.Replicas))
 			err = r.Patch(ctx, myDeployment, patch)
