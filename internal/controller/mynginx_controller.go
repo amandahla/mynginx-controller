@@ -126,57 +126,53 @@ func (r *MyNginxReconciler) ensureDeployment(ctx context.Context, myNginx *webap
 	myDeployment := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
 	if kerrors.IsNotFound(err) {
-		labels := map[string]string{
-			"app": myNginx.Name,
-		}
-		newDeployment := &appsv1.Deployment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      myNginx.Name,
-				Namespace: myNginx.Namespace,
+		return r.createDeployment(ctx, myNginx)
+	}
+
+	if err != nil || *myDeployment.Spec.Replicas == myNginx.Spec.Replicas {
+		return err
+	}
+
+	patch := client.MergeFrom(myDeployment.DeepCopy())
+	myDeployment.Spec.Replicas = ptr.To(myNginx.Spec.Replicas)
+	return r.Patch(ctx, myDeployment, patch)
+}
+
+func (r *MyNginxReconciler) createDeployment(ctx context.Context, myNginx *webappv1.MyNginx) error {
+	labels := map[string]string{
+		"app": myNginx.Name,
+	}
+	newDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      myNginx.Name,
+			Namespace: myNginx.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: ptr.To(myNginx.Spec.Replicas),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
 			},
-			Spec: appsv1.DeploymentSpec{
-				Replicas: ptr.To(myNginx.Spec.Replicas),
-				Selector: &metav1.LabelSelector{
-					MatchLabels: labels,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
 				},
-				Template: corev1.PodTemplateSpec{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: labels,
-					},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:  "nginx",
-								Image: "nginx",
-							},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "nginx",
+							Image: "nginx",
 						},
 					},
 				},
 			},
-		}
-
-		if err := ctrl.SetControllerReference(myNginx, newDeployment, r.Scheme); err != nil {
-			return err
-		}
-
-		err := r.Create(ctx, newDeployment)
-		if err != nil {
-			return err
-		}
+		},
 	}
 
-	if err == nil {
-		// myDeployment was found and we need to check if replicas are the same
-		if *myDeployment.Spec.Replicas != myNginx.Spec.Replicas {
-			patch := client.MergeFrom(myDeployment.DeepCopy())
-			myDeployment.Spec.Replicas = ptr.To(int32(myNginx.Spec.Replicas))
-			err = r.Patch(ctx, myDeployment, patch)
-			if err != nil {
-				return err
-			}
-		}
+	if err := ctrl.SetControllerReference(myNginx, newDeployment, r.Scheme); err != nil {
+		return err
 	}
-	return nil
+
+	return r.Create(ctx, newDeployment)
 }
 
 // SetupWithManager sets up the controller with the Manager.
