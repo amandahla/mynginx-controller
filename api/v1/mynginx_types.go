@@ -29,7 +29,7 @@ type MyNginxSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Number of replicas
-	Replicas int `json:"replicas,omitempty"`
+	Replicas int32 `json:"replicas,omitempty"`
 }
 
 // MyNginxStatus defines the observed state of MyNginx.
