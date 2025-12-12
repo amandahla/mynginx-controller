@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -51,20 +52,12 @@ var _ = Describe("MyNginx Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: webappv1.MyNginxSpec{
+						Replicas: 2,
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
-		})
-
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &webappv1.MyNginx{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Cleanup the specific resource instance MyNginx")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
@@ -77,8 +70,75 @@ var _ = Describe("MyNginx Controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+		})
+		It("should successfully add a finalizer if not found", func() {
+			By("Reconciling the created resource")
+			controllerReconciler := &MyNginxReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &webappv1.MyNginx{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
+			Expect(updated.Finalizers).To(ContainElement(MyNginxFinalizer))
+		})
+		It("should create a Deployment with the correct number of replicas", func() {
+			By("Reconciling the created resource")
+
+			controllerReconciler := &MyNginxReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			deploymentName := types.NamespacedName{
+				Name:      resourceName,
+				Namespace: "default",
+			}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, deploymentName, deployment)
+			}).Should(Succeed())
+			Expect(*deployment.Spec.Replicas).To(Equal(int32(2)))
+		})
+		It("should delete the Deployment when the resource is deleted", func() {
+			By("Reconciling the deleted resource")
+
+			mynginx := &webappv1.MyNginx{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, mynginx)).To(Succeed())
+			deployment := &appsv1.Deployment{}
+			deploymentName := types.NamespacedName{
+				Name:      resourceName,
+				Namespace: "default",
+			}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, deploymentName, deployment)
+			}).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, mynginx)).To(Succeed())
+
+			controllerReconciler := &MyNginxReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deploymentName, deployment)
+				return errors.IsNotFound(err)
+			}).Should(BeTrue())
 		})
 	})
 })

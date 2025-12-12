@@ -66,76 +66,54 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	myDeployment := &appsv1.Deployment{}
 	_ = r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
 
-	log.Info("handling finalizer")
-	stop, err := r.handleFinalizer(ctx, myNginx, myDeployment)
-	if err != nil {
+	log.Info("reconcile finalizer")
+	if changed := controllerutil.AddFinalizer(myNginx, MyNginxFinalizer); changed {
+		err := r.Update(ctx, myNginx) // TODO replace by patch
 		return ctrl.Result{}, err
 	}
 
-	if stop {
-		return ctrl.Result{}, nil
+	if !myNginx.ObjectMeta.DeletionTimestamp.IsZero() {
+		log.Info("reconcile delete")
+		return r.reconcileDelete(ctx, myNginx, myDeployment)
 	}
 
-	log.Info("ensuring deployment")
-	err = r.ensureDeployment(ctx, myNginx, ns)
-	if err != nil {
+	log.Info("reconcile deployment")
+	return r.reconcileDeployment(ctx, myNginx, ns)
+}
+
+func (r *MyNginxReconciler) reconcileDelete(ctx context.Context, myNginx *webappv1.MyNginx, myDeployment *appsv1.Deployment) (ctrl.Result, error) {
+	if myDeployment.Name == "" { // TODO watch deployments so if deleted, is recreated and we dont need to check this.
+		controllerutil.RemoveFinalizer(myNginx, MyNginxFinalizer)
+		err := r.Update(ctx, myNginx)
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, nil
-}
-
-func (r *MyNginxReconciler) handleFinalizer(ctx context.Context, myNginx *webappv1.MyNginx, myDeployment *appsv1.Deployment) (bool, error) {
-	// examine DeletionTimestamp to determine if object is under deletion
-	if myNginx.ObjectMeta.DeletionTimestamp.IsZero() {
-		// The object is not being deleted, so if it does not have our finalizer,
-		// then let's add the finalizer and update the object. This is equivalent
-		// to registering our finalizer.
-		if changed := controllerutil.AddFinalizer(myNginx, MyNginxFinalizer); changed {
-			err := r.Update(ctx, myNginx)
-			return true, err
-		}
-	} else {
-		// The object is being deleted
-		if controllerutil.ContainsFinalizer(myNginx, MyNginxFinalizer) {
-			// our finalizer is present, so let's handle any external dependency
-			// myDeployment was externally deleted
-			if myDeployment.Name == "" { // TODO watch deployments so if deleted, is recreated and we dont need to check this.
-				controllerutil.RemoveFinalizer(myNginx, MyNginxFinalizer)
-				err := r.Update(ctx, myNginx)
-				return true, err
-			}
-			err := r.Delete(ctx, myDeployment)
-			if err != nil && !kerrors.IsNotFound(err) {
-				// if fail to delete the external dependency here, return with error
-				// so that it can be retried.
-				return true, err
-			}
-
-			// remove our finalizer from the list and update it.
-			controllerutil.RemoveFinalizer(myNginx, MyNginxFinalizer)
-			err = r.Update(ctx, myNginx)
-			return true, err
-		}
-		// Stop reconciliation as the item is being deleted
-		return true, nil
+	err := r.Delete(ctx, myDeployment)
+	if err != nil && !kerrors.IsNotFound(err) {
+		// if fail to delete the external dependency here, return with error
+		// so that it can be retried.
+		return ctrl.Result{}, err
 	}
-	return false, nil
+
+	// remove our finalizer from the list and update it.
+	controllerutil.RemoveFinalizer(myNginx, MyNginxFinalizer)
+	err = r.Update(ctx, myNginx)
+	return ctrl.Result{}, err
 }
 
-func (r *MyNginxReconciler) ensureDeployment(ctx context.Context, myNginx *webappv1.MyNginx, ns string) error {
+func (r *MyNginxReconciler) reconcileDeployment(ctx context.Context, myNginx *webappv1.MyNginx, ns string) (ctrl.Result, error) {
 	myDeployment := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
 	if kerrors.IsNotFound(err) {
-		return r.createDeployment(ctx, myNginx)
+		return ctrl.Result{}, r.createDeployment(ctx, myNginx)
 	}
 
 	if err != nil || *myDeployment.Spec.Replicas == myNginx.Spec.Replicas {
-		return err
+		return ctrl.Result{}, err
 	}
 
 	patch := client.MergeFrom(myDeployment.DeepCopy())
 	myDeployment.Spec.Replicas = ptr.To(myNginx.Spec.Replicas)
-	return r.Patch(ctx, myDeployment, patch)
+	return ctrl.Result{}, r.Patch(ctx, myDeployment, patch)
 }
 
 func (r *MyNginxReconciler) createDeployment(ctx context.Context, myNginx *webappv1.MyNginx) error {
