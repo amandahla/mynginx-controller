@@ -22,88 +22,64 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	webappv1 "github.com/amandahla/mynginx-controller/api/v1"
 )
 
 var _ = Describe("MyNginx Controller", func() {
 	Context("When reconciling a resource", func() {
+		var namespace *corev1.Namespace
 		const resourceName = "test-resource"
-
 		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
-		}
-		mynginx := &webappv1.MyNginx{}
+		typeNamespacedName := types.NamespacedName{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind MyNginx")
-			err := k8sClient.Get(ctx, typeNamespacedName, mynginx)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &webappv1.MyNginx{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					Spec: webappv1.MyNginxSpec{
-						Replicas: 2,
-					},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &MyNginxReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			namespace = &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"}}
+			Expect(k8sClient.Create(context.Background(), namespace)).To(Succeed())
+			typeNamespacedName = types.NamespacedName{Name: resourceName, Namespace: namespace.Name}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
+			resource := &webappv1.MyNginx{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: namespace.Name,
+				},
+				Spec: webappv1.MyNginxSpec{
+					Replicas: 2,
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+		})
+		AfterEach(func() {
+			resource := &webappv1.MyNginx{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err == nil {
+				resource.Finalizers = nil
+				_ = k8sClient.Update(ctx, resource)
+				_ = k8sClient.Delete(ctx, resource)
+			}
+			Expect(k8sClient.Delete(ctx, namespace)).To(Succeed())
+
 		})
 		It("should successfully add a finalizer if not found", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &MyNginxReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
 			updated := &webappv1.MyNginx{}
-			Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
-			Expect(updated.Finalizers).To(ContainElement(MyNginxFinalizer))
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
+				g.Expect(updated.Finalizers).To(ContainElement(MyNginxFinalizer))
+			}, "10s", "1s").Should(Succeed())
 		})
 		It("should create a Deployment with the correct number of replicas", func() {
 			By("Reconciling the created resource")
-
-			controllerReconciler := &MyNginxReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
 			deployment := &appsv1.Deployment{}
 			deploymentName := types.NamespacedName{
 				Name:      resourceName,
-				Namespace: "default",
+				Namespace: namespace.Name,
 			}
 			Eventually(func() error {
 				return k8sClient.Get(ctx, deploymentName, deployment)
@@ -118,22 +94,13 @@ var _ = Describe("MyNginx Controller", func() {
 			deployment := &appsv1.Deployment{}
 			deploymentName := types.NamespacedName{
 				Name:      resourceName,
-				Namespace: "default",
+				Namespace: namespace.Name,
 			}
 			Eventually(func() error {
 				return k8sClient.Get(ctx, deploymentName, deployment)
 			}).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, mynginx)).To(Succeed())
-
-			controllerReconciler := &MyNginxReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, deploymentName, deployment)
