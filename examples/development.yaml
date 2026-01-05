@@ -1,0 +1,7 @@
+apiVersion: webapp.mynginx.amandahla.xyz/v1
+kind: MyNginx
+metadata:
+  name: dev-test
+  namespace: default
+spec:
+  replicas: 1
