@@ -120,6 +120,31 @@ func (r *MyNginxReconciler) createDeployment(ctx context.Context, myNginx *webap
 	labels := map[string]string{
 		"app": myNginx.Name,
 	}
+
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{
+			{
+				Name:  "nginx",
+				Image: "nginx",
+			},
+		},
+	}
+
+	myNginxVolume := corev1.Volume{
+		Name: "nginx-index-file",
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: myNginx.Spec.IndexConfigMapName,
+				},
+			},
+		},
+	}
+
+	if myNginx.Spec.IndexConfigMapName != "" {
+		podSpec.Volumes = append(podSpec.Volumes, myNginxVolume)
+	}
+
 	newDeployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      myNginx.Name,
@@ -134,14 +159,7 @@ func (r *MyNginxReconciler) createDeployment(ctx context.Context, myNginx *webap
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
 				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "nginx",
-							Image: "nginx",
-						},
-					},
-				},
+				Spec: podSpec,
 			},
 		},
 	}

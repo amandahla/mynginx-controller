@@ -28,8 +28,10 @@ type MyNginxSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Number of replicas
+	// Replicas define the number of replicas in the deployment.
 	Replicas int32 `json:"replicas,omitempty"`
+	// IndexConfigMapName defines the ConfigMap containing the custom index.html content to be served by the NGINX container.
+	IndexConfigMapName string `json:"indexConfigMapName,omitempty"`
 }
 
 // MyNginxStatus defines the observed state of MyNginx.
