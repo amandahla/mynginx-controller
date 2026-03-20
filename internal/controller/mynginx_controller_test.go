@@ -74,7 +74,7 @@ var _ = Describe("MyNginx Controller", func() {
 				g.Expect(updated.Finalizers).To(ContainElement(MyNginxFinalizer))
 			}, "10s", "1s").Should(Succeed())
 		})
-		It("should create a Deployment with the correct number of replicas", func() {
+		It("should create a Deployment with the correct number of replicas and condition is ready", func() {
 			By("Reconciling the created resource")
 			deployment := &appsv1.Deployment{}
 			deploymentName := types.NamespacedName{
@@ -85,6 +85,15 @@ var _ = Describe("MyNginx Controller", func() {
 				return k8sClient.Get(ctx, deploymentName, deployment)
 			}).Should(Succeed())
 			Expect(*deployment.Spec.Replicas).To(Equal(int32(2)))
+			resource := &webappv1.MyNginx{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, typeNamespacedName, resource)
+			}).Should(Succeed())
+			var conditions []metav1.Condition
+			Expect(resource.Status.Conditions).To(ContainElement(
+				HaveField("Type", Equal("Ready")), &conditions))
+			Expect(conditions[0].Status).To(Equal(metav1.ConditionTrue), "condition %s", "Ready")
+			Expect(conditions[0].Reason).To(Equal(MyNginxReadyReason), "condition %s", "Ready")
 		})
 		It("should delete the Deployment when the resource is deleted", func() {
 			By("Reconciling the deleted resource")

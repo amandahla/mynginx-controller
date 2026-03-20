@@ -22,6 +22,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,11 +32,14 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	webappv1 "github.com/amandahla/mynginx-controller/api/v1"
+	"github.com/go-logr/logr"
 	"k8s.io/utils/ptr"
 )
 
 // MyNginxFinalizer defines finalizer name
 const MyNginxFinalizer = "webapp.mynginx.amandahla.xyz/finalizer"
+const MyNginxReadyReason = "MyNginxReady"
+const ReasonConfigMapNotFound = "ConfigMapNotFound"
 
 // MyNginxReconciler reconciles a MyNginx object
 type MyNginxReconciler struct {
@@ -43,10 +47,17 @@ type MyNginxReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+type IndexConfigMapError struct{}
+
+func (m *IndexConfigMapError) Error() string {
+	return "Index Config Map not found or invalid key"
+}
+
 // +kubebuilder:rbac:groups=webapp.mynginx.amandahla.xyz,resources=mynginxes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=webapp.mynginx.amandahla.xyz,resources=mynginxes/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=webapp.mynginx.amandahla.xyz,resources=mynginxes/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx).WithValues("name", req.Name, "namespace", req.Namespace)
 
@@ -78,7 +89,20 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	log.Info("reconcile deployment")
-	return r.reconcileDeployment(ctx, myNginx, ns)
+	res, err := r.reconcileDeployment(ctx, myNginx, ns, log)
+	if err == nil {
+		meta.SetStatusCondition(&myNginx.Status.Conditions, metav1.Condition{
+			Type:               "Ready",
+			Status:             metav1.ConditionTrue,
+			Reason:             MyNginxReadyReason,
+			Message:            "MyNginx is ready.",
+			ObservedGeneration: myNginx.Generation,
+		})
+		if statusErr := r.Status().Update(ctx, myNginx); statusErr != nil {
+			log.Error(statusErr, "Failed to update MyNginx status")
+		}
+	}
+	return res, err
 }
 
 func (r *MyNginxReconciler) reconcileDelete(ctx context.Context, myNginx *webappv1.MyNginx, myDeployment *appsv1.Deployment) (ctrl.Result, error) {
@@ -100,11 +124,29 @@ func (r *MyNginxReconciler) reconcileDelete(ctx context.Context, myNginx *webapp
 	return ctrl.Result{}, err
 }
 
-func (r *MyNginxReconciler) reconcileDeployment(ctx context.Context, myNginx *webappv1.MyNginx, ns string) (ctrl.Result, error) {
+func (r *MyNginxReconciler) reconcileDeployment(ctx context.Context, myNginx *webappv1.MyNginx, ns string, log logr.Logger) (ctrl.Result, error) {
 	myDeployment := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
 	if kerrors.IsNotFound(err) {
-		return ctrl.Result{}, r.createDeployment(ctx, myNginx)
+		errCreate := r.createDeployment(ctx, myNginx)
+		_, ok := errCreate.(*IndexConfigMapError)
+		if ok {
+			// Update status condition to reflect the error
+			meta.SetStatusCondition(&myNginx.Status.Conditions, metav1.Condition{
+				Type:               "Ready",
+				Status:             metav1.ConditionFalse,
+				Reason:             ReasonConfigMapNotFound,
+				Message:            "Index Config Map not found.",
+				ObservedGeneration: myNginx.Generation,
+			})
+
+			if statusErr := r.Status().Update(ctx, myNginx); statusErr != nil {
+				log.Error(statusErr, "Failed to update MyNginx status")
+			}
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, errCreate
+
 	}
 
 	if err != nil || *myDeployment.Spec.Replicas == myNginx.Spec.Replicas {
@@ -121,27 +163,45 @@ func (r *MyNginxReconciler) createDeployment(ctx context.Context, myNginx *webap
 		"app": myNginx.Name,
 	}
 
-	podSpec := corev1.PodSpec{
-		Containers: []corev1.Container{
-			{
-				Name:  "nginx",
-				Image: "nginx",
-			},
-		},
-	}
-
-	myNginxVolume := corev1.Volume{
-		Name: "nginx-index-file",
-		VolumeSource: corev1.VolumeSource{
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: myNginx.Spec.IndexConfigMapName,
-				},
-			},
-		},
-	}
+	myNginxContainer := corev1.Container{Name: "nginx", Image: "nginx"}
+	var myNginxVolume corev1.Volume
 
 	if myNginx.Spec.IndexConfigMapName != "" {
+		indexConfigMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, types.NamespacedName{Namespace: myNginx.Namespace, Name: myNginx.Spec.IndexConfigMapName}, indexConfigMap)
+		if kerrors.IsNotFound(err) {
+			return &IndexConfigMapError{}
+		}
+		_, ok := indexConfigMap.Data["index.html"]
+		if !ok {
+			return &IndexConfigMapError{}
+		}
+		volumeName := "nginx-index-file"
+		myNginxVolume = corev1.Volume{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: myNginx.Spec.IndexConfigMapName,
+					},
+				},
+			},
+		}
+
+		myNginxContainer.VolumeMounts = []corev1.VolumeMount{
+			{
+				Name:      volumeName,
+				MountPath: "/usr/share/nginx/html/",
+			},
+		}
+	}
+
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{
+			myNginxContainer,
+		},
+	}
+	if myNginxVolume.Name != "" {
 		podSpec.Volumes = append(podSpec.Volumes, myNginxVolume)
 	}
 

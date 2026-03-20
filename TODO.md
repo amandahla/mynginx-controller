@@ -3,10 +3,10 @@
 ## High Priority (Missing Requirements)
 
 ### 1. ConfigMap Integration
-- [ ] Add `ConfigMapName` field to MyNginxSpec
-- [ ] Update controller to mount ConfigMap as index.html
-- [ ] Add validation for ConfigMap existence
-- [ ] Update status on ConfigMap not found
+- [X] Add `ConfigMapName` field to MyNginxSpec
+- [X] Update controller to mount ConfigMap as index.html
+- [X] Add validation for ConfigMap existence
+- [X] Update status on ConfigMap not found
 - [ ] Add tests for ConfigMap scenarios
 
 ### 2. Secret Integration (TLS)
@@ -18,10 +18,10 @@
 - [ ] Add tests for TLS scenarios
 
 ### 3. Status Reporting
-- [ ] Define MyNginxStatus fields (Ready, Error, Message)
-- [ ] Update status on reconciliation success/failure
-- [ ] Add status conditions pattern
-- [ ] Report ConfigMap/Secret validation errors
+- [X] Define MyNginxStatus fields (Ready, Error, Message)
+- [X] Update status on reconciliation success/failure
+- [X] Add status conditions pattern
+- [X] Report ConfigMap/Secret validation errors
 - [ ] Add status-focused tests
 
 ## Medium Priority (Improvements)
