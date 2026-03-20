@@ -11,7 +11,7 @@ The MyNginx Controller creates and manages nginx deployments based on `MyNginx` 
 - ✅ **Custom Resource Management**: Define nginx deployments via `MyNginx` CRD
 - ✅ **Scalable Deployments**: Configurable replica count
 - ✅ **Lifecycle Management**: Proper cleanup with finalizers
-- 🔄 **ConfigMap Integration**: Mount custom HTML content (planned)
+- ✅ **ConfigMap Integration**: Mount custom HTML content (planned)
 - 🔄 **TLS Support**: Mount TLS certificates from Secrets (planned)
 - 🔄 **Status Reporting**: Rich error and status information (planned)
 
@@ -43,6 +43,7 @@ metadata:
   name: my-nginx
 spec:
   replicas: 3
+  indexConfigMapName: my-index
 ```
 
 ## Documentation
@@ -104,14 +105,5 @@ MyNginx CRD → Controller → Nginx Deployment
 
 ## Project Status
 
-**Current**: Basic controller with replica management  
-**Next**: ConfigMap and Secret integration, status reporting
-
-## Changelog
-
-### 2025-09-19
-Refactor finalizer and ensureDeployment.
-
-### 2025-09-01
-Controller creates, updates and deletes deployment based on CRD mynginx.
-  
+**Current**: Basic controller with replica and ConfigMap management  
+**Next**: Secret integration, status reporting

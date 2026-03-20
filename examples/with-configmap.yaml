@@ -21,4 +21,4 @@ metadata:
   namespace: default
 spec:
   replicas: 1
-  # configMapName: my-html-content  # Not yet implemented
+  indexConfigMapName: my-html-content
