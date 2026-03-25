@@ -39,7 +39,8 @@ import (
 // MyNginxFinalizer defines finalizer name
 const MyNginxFinalizer = "webapp.mynginx.amandahla.xyz/finalizer"
 const MyNginxReadyReason = "MyNginxReady"
-const ReasonConfigMapNotFound = "ConfigMapNotFound"
+const MyNginxReadyReasonConfigMapNotFound = "ConfigMapNotFound"
+const MyNginxReadyCondition = "Ready"
 
 // MyNginxReconciler reconciles a MyNginx object
 type MyNginxReconciler struct {
@@ -70,6 +71,20 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Set to unknown if condition doesn't exist
+	if meta.FindStatusCondition(myNginx.Status.Conditions, MyNginxReadyCondition) == nil {
+		meta.SetStatusCondition(&myNginx.Status.Conditions, metav1.Condition{
+			Type:               MyNginxReadyCondition,
+			Status:             metav1.ConditionUnknown,
+			Reason:             "Reconciling",
+			Message:            "Starting reconciliation",
+			ObservedGeneration: myNginx.Generation,
+		})
+		if statusErr := r.Status().Update(ctx, myNginx); statusErr != nil {
+			log.Error(statusErr, "Failed to update MyNginx status")
+		}
+	}
+
 	ns := req.NamespacedName.Namespace
 	if ns == "" {
 		ns = "default"
@@ -92,10 +107,10 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	res, err := r.reconcileDeployment(ctx, myNginx, ns, log)
 	if err == nil {
 		meta.SetStatusCondition(&myNginx.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               MyNginxReadyCondition,
 			Status:             metav1.ConditionTrue,
 			Reason:             MyNginxReadyReason,
-			Message:            "MyNginx is ready.",
+			Message:            "MyNginx is ready",
 			ObservedGeneration: myNginx.Generation,
 		})
 		if statusErr := r.Status().Update(ctx, myNginx); statusErr != nil {
@@ -133,10 +148,10 @@ func (r *MyNginxReconciler) reconcileDeployment(ctx context.Context, myNginx *we
 		if ok {
 			// Update status condition to reflect the error
 			meta.SetStatusCondition(&myNginx.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               MyNginxReadyCondition,
 				Status:             metav1.ConditionFalse,
-				Reason:             ReasonConfigMapNotFound,
-				Message:            "Index Config Map not found.",
+				Reason:             MyNginxReadyReasonConfigMapNotFound,
+				Message:            "Index Config Map not found",
 				ObservedGeneration: myNginx.Generation,
 			})
 
