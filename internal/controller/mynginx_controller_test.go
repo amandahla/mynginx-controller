@@ -55,14 +55,18 @@ var _ = Describe("MyNginx Controller", func() {
 
 		})
 		AfterEach(func() {
-			resource := &webappv1.MyNginx{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			if err == nil {
-				resource.Finalizers = nil
-				_ = k8sClient.Update(ctx, resource)
-				_ = k8sClient.Delete(ctx, resource)
-			}
-			Expect(k8sClient.Delete(ctx, namespace)).To(Succeed())
+			By("removing the custom resource for the Kind MyNginx")
+			found := &webappv1.MyNginx{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, found)).To(Succeed())
+				g.Expect(found.Finalizers).To(ContainElement(MyNginxFinalizer))
+			}, "10s", "1s").Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Delete(ctx, found)).To(Succeed())
+			}).Should(Succeed())
+			By("Deleting the Namespace to perform the tests")
+			_ = k8sClient.Delete(ctx, namespace)
 
 		})
 		It("should successfully add a finalizer if not found", func() {
