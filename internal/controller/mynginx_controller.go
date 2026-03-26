@@ -85,13 +85,6 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	ns := req.NamespacedName.Namespace
-	if ns == "" {
-		ns = "default"
-	}
-	myDeployment := &appsv1.Deployment{}
-	_ = r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
-
 	log.Info("reconcile finalizer")
 	if changed := controllerutil.AddFinalizer(myNginx, MyNginxFinalizer); changed {
 		err := r.Update(ctx, myNginx) // TODO replace by patch
@@ -100,11 +93,13 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	if !myNginx.ObjectMeta.DeletionTimestamp.IsZero() {
 		log.Info("reconcile delete")
-		return r.reconcileDelete(ctx, myNginx, myDeployment)
+		controllerutil.RemoveFinalizer(myNginx, MyNginxFinalizer)
+		err := r.Update(ctx, myNginx)
+		return ctrl.Result{}, err
 	}
 
 	log.Info("reconcile deployment")
-	res, err := r.reconcileDeployment(ctx, myNginx, ns, log)
+	res, err := r.reconcileDeployment(ctx, myNginx, log)
 	if err == nil {
 		meta.SetStatusCondition(&myNginx.Status.Conditions, metav1.Condition{
 			Type:               MyNginxReadyCondition,
@@ -120,28 +115,9 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return res, err
 }
 
-func (r *MyNginxReconciler) reconcileDelete(ctx context.Context, myNginx *webappv1.MyNginx, myDeployment *appsv1.Deployment) (ctrl.Result, error) {
-	if myDeployment.Name == "" { // TODO watch deployments so if deleted, is recreated and we dont need to check this.
-		controllerutil.RemoveFinalizer(myNginx, MyNginxFinalizer)
-		err := r.Update(ctx, myNginx)
-		return ctrl.Result{}, err
-	}
-	err := r.Delete(ctx, myDeployment)
-	if err != nil && !kerrors.IsNotFound(err) {
-		// if fail to delete the external dependency here, return with error
-		// so that it can be retried.
-		return ctrl.Result{}, err
-	}
-
-	// remove our finalizer from the list and update it.
-	controllerutil.RemoveFinalizer(myNginx, MyNginxFinalizer)
-	err = r.Update(ctx, myNginx)
-	return ctrl.Result{}, err
-}
-
-func (r *MyNginxReconciler) reconcileDeployment(ctx context.Context, myNginx *webappv1.MyNginx, ns string, log logr.Logger) (ctrl.Result, error) {
+func (r *MyNginxReconciler) reconcileDeployment(ctx context.Context, myNginx *webappv1.MyNginx, log logr.Logger) (ctrl.Result, error) {
 	myDeployment := &appsv1.Deployment{}
-	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: myNginx.Name}, myDeployment)
+	err := r.Get(ctx, types.NamespacedName{Namespace: myNginx.Namespace, Name: myNginx.Name}, myDeployment)
 	if kerrors.IsNotFound(err) {
 		errCreate := r.createDeployment(ctx, myNginx)
 		_, ok := errCreate.(*IndexConfigMapError)
@@ -250,6 +226,7 @@ func (r *MyNginxReconciler) createDeployment(ctx context.Context, myNginx *webap
 func (r *MyNginxReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&webappv1.MyNginx{}).
+		Owns(&appsv1.Deployment{}).
 		Named("mynginx").
 		Complete(r)
 }

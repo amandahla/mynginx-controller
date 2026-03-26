@@ -23,7 +23,6 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -94,27 +93,6 @@ var _ = Describe("MyNginx Controller", func() {
 				HaveField("Type", Equal("Ready")), &conditions))
 			Expect(conditions[0].Status).To(Equal(metav1.ConditionTrue), "condition %s", "Ready")
 			Expect(conditions[0].Reason).To(Equal(MyNginxReadyReason), "condition %s", "Ready")
-		})
-		It("should delete the Deployment when the resource is deleted", func() {
-			By("Reconciling the deleted resource")
-
-			mynginx := &webappv1.MyNginx{}
-			Expect(k8sClient.Get(ctx, typeNamespacedName, mynginx)).To(Succeed())
-			deployment := &appsv1.Deployment{}
-			deploymentName := types.NamespacedName{
-				Name:      resourceName,
-				Namespace: namespace.Name,
-			}
-			Eventually(func() error {
-				return k8sClient.Get(ctx, deploymentName, deployment)
-			}).Should(Succeed())
-
-			Expect(k8sClient.Delete(ctx, mynginx)).To(Succeed())
-
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, deploymentName, deployment)
-				return errors.IsNotFound(err)
-			}).Should(BeTrue())
 		})
 	})
 })
