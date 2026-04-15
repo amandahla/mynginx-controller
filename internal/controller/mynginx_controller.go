@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -45,7 +46,8 @@ const MyNginxReadyCondition = "Ready"
 // MyNginxReconciler reconciles a MyNginx object
 type MyNginxReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder events.EventRecorder
 }
 
 type IndexConfigMapError struct{}
@@ -115,6 +117,7 @@ func (r *MyNginxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return res, err
 }
 
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 func (r *MyNginxReconciler) reconcileDeployment(ctx context.Context, myNginx *webappv1.MyNginx, log logr.Logger) (ctrl.Result, error) {
 	myDeployment := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: myNginx.Namespace, Name: myNginx.Name}, myDeployment)
@@ -134,7 +137,17 @@ func (r *MyNginxReconciler) reconcileDeployment(ctx context.Context, myNginx *we
 			if statusErr := r.Status().Update(ctx, myNginx); statusErr != nil {
 				log.Error(statusErr, "Failed to update MyNginx status")
 			}
+
+			r.Recorder.Eventf(myNginx, nil, corev1.EventTypeWarning, "ConfigMapNotFound", "CreateDeployment",
+				"ConfigMap %s for Deployment %s was not found in the namespace %s",
+				myNginx.Spec.IndexConfigMapName, myNginx.Name, myNginx.Namespace)
+
 			return ctrl.Result{}, nil
+		}
+		if errCreate == nil {
+			r.Recorder.Eventf(myNginx, nil, corev1.EventTypeNormal, "Created", "CreateDeployment",
+				"Deployment %s is created in the namespace %s",
+				myNginx.Name, myNginx.Namespace)
 		}
 		return ctrl.Result{}, errCreate
 
@@ -146,7 +159,13 @@ func (r *MyNginxReconciler) reconcileDeployment(ctx context.Context, myNginx *we
 
 	patch := client.MergeFrom(myDeployment.DeepCopy())
 	myDeployment.Spec.Replicas = ptr.To(myNginx.Spec.Replicas)
-	return ctrl.Result{}, r.Patch(ctx, myDeployment, patch)
+	errPatch := r.Patch(ctx, myDeployment, patch)
+	if errPatch == nil {
+		r.Recorder.Eventf(myNginx, nil, corev1.EventTypeNormal, "Changed", "ChangeDeployment",
+			"Deployment %s was changed to %d replicas in the namespace %s",
+			myNginx.Name, myNginx.Spec.Replicas, myNginx.Namespace)
+	}
+	return ctrl.Result{}, errPatch
 }
 
 func (r *MyNginxReconciler) createDeployment(ctx context.Context, myNginx *webappv1.MyNginx) error {
